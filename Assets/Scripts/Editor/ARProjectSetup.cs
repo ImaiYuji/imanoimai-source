@@ -30,13 +30,13 @@ namespace ARCharacterApp.EditorTools
         const string k_AndroidPackage = "com.imaiyuji.imanoimai";
 
         /// <summary>画面や配布ページに出るバージョン。</summary>
-        const string k_VersionName = "1.0.1";
+        const string k_VersionName = "1.1.0";
 
         /// <summary>
         /// 更新のたびに増やす番号。
         /// これが増えていないと、端末は「同じか古い版」とみなして更新を拒む。
         /// </summary>
-        const int k_VersionCode = 2;
+        const int k_VersionCode = 3;
 
         const string k_CameraUsage =
             "現実の空間にキャラクターを表示するために、カメラを使用します。";

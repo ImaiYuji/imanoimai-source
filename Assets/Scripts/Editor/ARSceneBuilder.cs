@@ -71,12 +71,8 @@ namespace ARCharacterApp.EditorTools
 
             // ---- 見た目の部品 -----------------------------------------------
             var reticle = CreateReticle();
+            // 本物のモデルが入るまでの下地。手順 4 で差し替わる。
             var characterPrefab = CreatePlaceholderCharacterPrefab();
-
-            // キャラ切り替えを試せるように、色違いの仮モデルをもう 1 体作っておく。
-            // 本物のモデルが届いたら AnomeaCharacterSetup 側の一覧を差し替える。
-            CreatePlaceholderCharacterPrefab("PlaceholderCharacterB",
-                new Color(0.95f, 0.55f, 0.72f), new Color(0.99f, 0.88f, 0.80f));
 
             // ---- フォールバック用ビューア -----------------------------------
             var fallbackRoot = new GameObject("Fallback Viewer");

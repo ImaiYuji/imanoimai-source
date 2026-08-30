@@ -28,6 +28,16 @@ namespace ARCharacterApp.EditorTools
         const string k_ScenePath = "Assets/Scenes/AR.unity";
 
         /// <summary>
+        /// 2 体目のキャラクター。
+        /// ポーズは Humanoid のリターゲットで動くのでボーン名が違っても使える。
+        /// 表情は BlendShape 名の一致が要るが、実測で 184 種中 177 種が一致した
+        /// (足りないのは EyePatch 系 6 種と Eye_>< の計 7 種で、このモデルには無い装備)。
+        /// </summary>
+        const string k_ExtraFbx = "Assets/Hiasobi/FBX/Hiasobi.fbx";
+        const string k_ExtraPrefab = "Assets/Prefabs/Hiasobi.prefab";
+        const string k_ExtraLabel = "ダーク今井ちゃん";
+
+        /// <summary>
         /// レイヤー 0 に載せる全身ポーズ。State 名は AnimationClip 名と同じ。
         /// 表示名は実機で見て決め直す前提の仮置き。
         /// </summary>
@@ -163,7 +173,10 @@ namespace ARCharacterApp.EditorTools
             if (prefab == null)
                 return;
 
-            WireIntoScene(prefab);
+            // 2 体目。シーンを開く前に作っておく。
+            var extra = BuildExtraCharacter(controller);
+
+            WireIntoScene(prefab, extra);
         }
 
         /// <summary>
@@ -495,22 +508,108 @@ namespace ARCharacterApp.EditorTools
         }
 
         /// <summary>
-        /// モデルが届くまでのあいだ、キャラ切り替えを試せるようにしておく仮のプレハブ。
-        /// 実物が来たらここを差し替えるだけで済む。
+        /// FBX からもう 1 体キャラクターを組み立てる。
+        ///
+        /// Anomea と違って元プレハブが無いので、FBX から直接プレハブを作る。
+        /// Animator Controller は共有する。ポーズは Humanoid のマッスルなので
+        /// ボーン名が違っても効き、表情は BlendShape 名で当たる。
         /// </summary>
-        static IEnumerable<(string label, GameObject prefab)> LoadPlaceholders()
+        static GameObject BuildExtraCharacter(AnimatorController controller)
         {
-            var candidates = new (string label, string path)[]
+            if (AssetImporter.GetAtPath(k_ExtraFbx) is not ModelImporter importer)
             {
-                ("ゲスト A", "Assets/Prefabs/PlaceholderCharacter.prefab"),
-                ("ゲスト B", "Assets/Prefabs/PlaceholderCharacterB.prefab"),
-            };
+                Debug.LogWarning($"[AnomeaCharacterSetup] {k_ExtraFbx} がありません。2 体目は作りません。");
+                return null;
+            }
 
-            foreach (var (label, path) in candidates)
+            // ポーズを使うには Humanoid でないといけない。
+            //
+            // あわせてメッシュを軽くする。このモデルは BlendShape が 305 個あり、
+            // 既定のまま取り込むと差分データだけで 1.1GB になった
+            // (305 × 頂点数 × 位置・法線・接線)。APK が 627MB まで膨らんで配布できない。
+            // 法線と接線の差分を捨てると位置だけになり、3 分の 1 に減る。
+            // トゥーン表現なので、表情で法線が変わらなくても見た目にはほぼ出ない。
+            var needsReimport =
+                importer.animationType != ModelImporterAnimationType.Human
+                || importer.importBlendShapeNormals != ModelImporterNormals.None
+                || importer.meshCompression != ModelImporterMeshCompression.High
+                || !importer.optimizeMeshPolygons
+                || !importer.optimizeMeshVertices;
+
+            if (needsReimport)
             {
-                var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
-                if (prefab != null)
-                    yield return (label, prefab);
+                importer.animationType = ModelImporterAnimationType.Human;
+                importer.importBlendShapeNormals = ModelImporterNormals.None;
+                importer.meshCompression = ModelImporterMeshCompression.High;
+                importer.optimizeMeshPolygons = true;
+                importer.optimizeMeshVertices = true;
+                importer.SaveAndReimport();
+                Debug.Log($"[AnomeaCharacterSetup] {k_ExtraFbx} を Humanoid + メッシュ圧縮で取り込みました。");
+            }
+
+            var source = AssetDatabase.LoadAssetAtPath<GameObject>(k_ExtraFbx);
+            if (source == null)
+            {
+                Debug.LogError($"[AnomeaCharacterSetup] {k_ExtraFbx} を読み込めません。");
+                return null;
+            }
+
+            var instance = (GameObject)PrefabUtility.InstantiatePrefab(source);
+            if (instance == null)
+                return null;
+
+            try
+            {
+                var animator = instance.GetComponentInChildren<Animator>();
+                if (animator == null || animator.avatar == null || !animator.avatar.isHuman)
+                {
+                    Debug.LogError("[AnomeaCharacterSetup] 2 体目が Humanoid になっていません。");
+                    return null;
+                }
+
+                animator.runtimeAnimatorController = controller;
+                animator.applyRootMotion = false;
+                animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+
+                if (instance.GetComponent<ARCharacter>() == null)
+                    instance.AddComponent<ARCharacter>();
+
+                var poser = instance.GetComponent<ARCharacterPoser>() ?? instance.AddComponent<ARCharacterPoser>();
+                WirePoser(poser, animator);
+
+                var breathing = instance.GetComponent<ARCharacterBreathing>() ?? instance.AddComponent<ARCharacterBreathing>();
+                var breathSo = new SerializedObject(breathing);
+                breathSo.FindProperty("m_Animator").objectReferenceValue = animator;
+                breathSo.ApplyModifiedPropertiesWithoutUndo();
+
+                // 着せ替えは、このモデルに実在するメッシュだけが登録される
+                var wardrobe = instance.GetComponent<ARCharacterWardrobe>() ?? instance.AddComponent<ARCharacterWardrobe>();
+                WireWardrobe(wardrobe, instance);
+
+                var headLookGo = animator.gameObject;
+                var headLook = headLookGo.GetComponent<ARCharacterHeadLook>()
+                               ?? headLookGo.AddComponent<ARCharacterHeadLook>();
+                var headSo = new SerializedObject(headLook);
+                headSo.FindProperty("m_Animator").objectReferenceValue = animator;
+                headSo.ApplyModifiedPropertiesWithoutUndo();
+
+                var saved = PrefabUtility.SaveAsPrefabAsset(instance, k_ExtraPrefab, out var ok);
+                if (!ok)
+                {
+                    Debug.LogError($"[AnomeaCharacterSetup] {k_ExtraPrefab} の保存に失敗しました。");
+                    return null;
+                }
+
+                var renderers = instance.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+                var shapes = renderers.Sum(r => r.sharedMesh != null ? r.sharedMesh.blendShapeCount : 0);
+                Debug.Log($"[AnomeaCharacterSetup] 2 体目「{k_ExtraLabel}」を作成: "
+                    + $"メッシュ {renderers.Length} / BlendShape {shapes}");
+
+                return saved;
+            }
+            finally
+            {
+                Object.DestroyImmediate(instance);
             }
         }
 
@@ -626,7 +725,7 @@ namespace ARCharacterApp.EditorTools
             return name.Replace('_', ' ');
         }
 
-        static void WireIntoScene(GameObject prefab)
+        static void WireIntoScene(GameObject prefab, GameObject extra)
         {
             var scene = EditorSceneManager.OpenScene(k_ScenePath, OpenSceneMode.Single);
 
@@ -637,11 +736,11 @@ namespace ARCharacterApp.EditorTools
                 so.FindProperty("m_CharacterPrefab").objectReferenceValue = prefab;
 
                 // 差し替えられるキャラクター一覧。
-                // 2 体目以降はモデルが届くまでの仮置き。
                 var entries = new List<(string label, GameObject prefab)> { ("今井ちゃん", prefab) };
 
-                foreach (var placeholder in LoadPlaceholders())
-                    entries.Add(placeholder);
+                // 2 体目。ポーズと表情は今井ちゃんと共有する。
+                if (extra != null)
+                    entries.Add((k_ExtraLabel, extra));
 
                 var list = so.FindProperty("m_Characters");
                 list.arraySize = entries.Count;
