@@ -25,14 +25,17 @@ namespace ARCharacterApp.EditorTools
     ///   - BlendShape       … 表情レイヤーの担当
     ///   - メッシュの表示/非表示 … Wardrobe の担当
     ///
-    /// 髪やスカートのボーンは落とさない。
-    /// これは作者がポーズごとに作り込んだ配置で、寝そべりや腕上げのときに
-    /// 髪を体から逃がす役目を持っている。一度これも落としたところ、
-    /// 髪がバインドポーズのまま固まって体を貫通するようになった。
+    /// 髪やスカートのボーンも落とす。
     ///
-    /// なお作者のデータを持つポーズは 105 件中 8 件しかない。
-    /// 残りは髪が固定されたままなので、体に入り込むポーズは残っている。
-    /// 揺れものを入れれば解けるが、いまは対応していない。
+    /// これらは作者がポーズごとに作り込んだ配置で、残せば見た目は良くなる。
+    /// しかし持っているのは 105 件中 12 件だけで、ポーズレイヤーは
+    /// Write Defaults を切ってあるため、持っていないポーズに移っても
+    /// 誰も書き戻さず、前のポーズの角度が残り続ける。
+    /// 実際、スカートをめくるポーズから別のポーズに移ってもめくれたままになった。
+    ///
+    /// 全クリップに不足分のカーブを補えば解決するが、
+    /// 1 クリップあたり 500 本以上増えるため見送っている。
+    /// いまは「ポーズは体の姿勢だけを決める」に統一する。
     ///
     /// 元のクリップは作者の資産なので触らない。複製を作ってそちらを削る。
     /// </summary>
@@ -118,20 +121,17 @@ namespace ARCharacterApp.EditorTools
         /// <summary>
         /// ポーズが持っていてよいカーブか。
         ///
-        /// 残すもの:
-        ///   - Humanoid のマッスルと Root (Animator にパス無しでぶら下がる)
-        ///   - ボーンの Transform (髪・スカート・アクセサリの配置)
+        /// 残すのは Humanoid のマッスルと Root だけ。
+        /// これらは Animator にパス無しでぶら下がる。
         ///
         /// 落とすもの:
-        ///   - BlendShape (表情レイヤーと取り合いになる)
+        ///   - BlendShape        (表情レイヤーと取り合いになる)
         ///   - メッシュの表示/非表示 (Wardrobe と取り合いになる)
+        ///   - ボーンの Transform  (次のポーズに持ち越されてしまう)
         /// </summary>
         static bool IsPosture(EditorCurveBinding binding)
         {
-            if (binding.type == typeof(Animator) && string.IsNullOrEmpty(binding.path))
-                return true;
-
-            return binding.type == typeof(Transform);
+            return binding.type == typeof(Animator) && string.IsNullOrEmpty(binding.path);
         }
     }
 }
