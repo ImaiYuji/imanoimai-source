@@ -38,6 +38,14 @@ namespace ARCharacterApp.EditorTools
         const string k_ExtraLabel = "ダーク今井ちゃん";
 
         /// <summary>
+        /// 2 体目を入れるかどうか。
+        ///
+        /// 最初の公開は今井ちゃん 1 体だけにする。ダーク今井ちゃんは
+        /// 見た目の確認が済んでいるので、出すときはこれを true に戻すだけでよい。
+        /// </summary>
+        const bool k_IncludeExtraCharacter = false;
+
+        /// <summary>
         /// レイヤー 0 に載せる全身ポーズ。State 名は AnimationClip 名と同じ。
         /// 表示名は実機で見て決め直す前提の仮置き。
         /// </summary>
@@ -516,6 +524,12 @@ namespace ARCharacterApp.EditorTools
         /// </summary>
         static GameObject BuildExtraCharacter(AnimatorController controller)
         {
+            if (!k_IncludeExtraCharacter)
+            {
+                Debug.Log($"[AnomeaCharacterSetup] 2 体目「{k_ExtraLabel}」は今回入れません。");
+                return null;
+            }
+
             if (AssetImporter.GetAtPath(k_ExtraFbx) is not ModelImporter importer)
             {
                 Debug.LogWarning($"[AnomeaCharacterSetup] {k_ExtraFbx} がありません。2 体目は作りません。");
@@ -524,27 +538,30 @@ namespace ARCharacterApp.EditorTools
 
             // ポーズを使うには Humanoid でないといけない。
             //
-            // あわせてメッシュを軽くする。このモデルは BlendShape が 305 個あり、
-            // 既定のまま取り込むと差分データだけで 1.1GB になった
-            // (305 × 頂点数 × 位置・法線・接線)。APK が 627MB まで膨らんで配布できない。
-            // 法線と接線の差分を捨てると位置だけになり、3 分の 1 に減る。
-            // トゥーン表現なので、表情で法線が変わらなくても見た目にはほぼ出ない。
+            // メッシュ圧縮はかけない。一度 High を試したが、頂点座標が量子化されて
+            // 表面がシワシワに潰れた。このモデルは服のディテールが細かいので、
+            // 量子化の誤差がそのまま見た目に出る。容量より形を優先する。
+            //
+            // BlendShape の法線・接線の差分だけは捨てる。305 個あるので
+            // (305 × 頂点数 × 位置・法線・接線) で差分データが 1.1GB になり、
+            // 位置だけに絞ると 3 分の 1 で済む。トゥーン表現なので、
+            // 表情で法線が変わらなくても見た目にはほぼ出ない。
             var needsReimport =
                 importer.animationType != ModelImporterAnimationType.Human
                 || importer.importBlendShapeNormals != ModelImporterNormals.None
-                || importer.meshCompression != ModelImporterMeshCompression.High
-                || !importer.optimizeMeshPolygons
-                || !importer.optimizeMeshVertices;
+                || importer.meshCompression != ModelImporterMeshCompression.Off
+                || importer.optimizeMeshPolygons
+                || importer.optimizeMeshVertices;
 
             if (needsReimport)
             {
                 importer.animationType = ModelImporterAnimationType.Human;
                 importer.importBlendShapeNormals = ModelImporterNormals.None;
-                importer.meshCompression = ModelImporterMeshCompression.High;
-                importer.optimizeMeshPolygons = true;
-                importer.optimizeMeshVertices = true;
+                importer.meshCompression = ModelImporterMeshCompression.Off;
+                importer.optimizeMeshPolygons = false;
+                importer.optimizeMeshVertices = false;
                 importer.SaveAndReimport();
-                Debug.Log($"[AnomeaCharacterSetup] {k_ExtraFbx} を Humanoid + メッシュ圧縮で取り込みました。");
+                Debug.Log($"[AnomeaCharacterSetup] {k_ExtraFbx} を Humanoid で取り込みました（メッシュ圧縮なし）。");
             }
 
             var source = AssetDatabase.LoadAssetAtPath<GameObject>(k_ExtraFbx);
@@ -566,6 +583,10 @@ namespace ARCharacterApp.EditorTools
                     Debug.LogError("[AnomeaCharacterSetup] 2 体目が Humanoid になっていません。");
                     return null;
                 }
+
+                // FBX に残っているのはマテリアル名だけで、中身は Standard になっている。
+                // 1 体目と同じく lilToon のものに貼り替える。
+                HiasobiMaterialSetup.Apply(instance);
 
                 animator.runtimeAnimatorController = controller;
                 animator.applyRootMotion = false;
